@@ -2452,27 +2452,92 @@ The results are quite intriguing – two failed attempts for the administrator a
 
 At this stage, we have amassed a significant amount of information to present and initiate a comprehensive incident response, in accordance with company policies.
 
+### Introduction To Splunk & SPL
+
+**What Is Splunk?**
+
+Splunk is a highly scalable, versatile, and robust data analytics software solution known for its ability to ingest, index, analyze, and visualize massive amounts of machine data. Splunk has the capability to drive a wide range of initiatives, encompassing cybersecurity, compliance, data pipelines, IT monitoring, observability, as well as overall IT and business management.
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/b44ba757-c018-4848-b855-65e5867403ee)
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/150a55f4-d98b-4bed-83ad-8a530265c0cb)
 
 
+Splunk's (Splunk Enterprise) architecture consists of several layers that work together to collect, index, search, analyze, and visualize data. The architecture can be divided into the following main components:
+
+- Forwarders: Forwarders are responsible for data collection. They gather machine data from various sources and forward it to the indexers. The types of forwarders used in Splunk are:
+- Universal Forwarder (UF): This is a lightweight agent that collects data and forwards it to the Splunk indexers without any preprocessing. Universal Forwarders are individual software packages that can be easily installed on remote sources without significantly affecting network or host performance.
+- Heavy Forwarder (HF): This agent serves the purpose of collecting data from remote sources, especially for intensive data aggregation assignments involving sources like firewalls or data routing/filtering points. According to Splexicon, heavy forwarders stand out from other types of forwarders as they parse data before forwarding, allowing them to route data based on specific criteria such as event source or type. They can also index data locally while simultaneously forwarding it to another indexer. Typically, Heavy Forwarders are deployed as dedicated "data collection nodes" for API/scripted data access, and they exclusively support Splunk Enterprise.
+- Please note that there are HTTP Event Collectors (HECs) available for directly collecting data from applications in a scalable manner. HECs operate by using token-based JSON or raw API methods. In this process, data is sent directly to the Indexer level for further processing.
+
+- Indexers: The indexers receive data from the forwarders, organize it, and store it in indexes. While indexing data, the indexers generate sets of directories categorized by age, wherein each directory hold compressed raw data and corresponding indexes that point to the raw data. They also process search queries from users and return results.
+
+- Search Heads: Search heads coordinate search jobs, dispatching them to the indexers and merging the results. They also provide an interface for users to interact with Splunk. On Search Heads, Knowledge Objects can be crafted to extract supplementary fields and manipulate data without modifying the original index data. It is important to mention that Search Heads also offer various tools to enrich the search experience, including reports, dashboards, and visualizations.
+
+- Deployment Server: It manages the configuration for forwarders, distributing apps and updates.
+
+- Cluster Master: The cluster master coordinates the activities of indexers in a clustered environment, ensuring data replication and search affinity.
+
+- License Master: It manages the licensing details of the Splunk platform.
+
+Splunk's key components include:
+
+- Splunk Web Interface: This is the graphical interface through which users can interact with Splunk, carrying out tasks like searching, creating alerts, dashboards, and reports.
+- Search Processing Language (SPL): The query language for Splunk, allowing users to search, filter, and manipulate the indexed data.
+- Apps and Add-ons: Apps provide specific functionalities within Splunk, while add-ons extend capabilities or integrate with other systems. Splunk Apps enable the coexistence of multiple workspaces on a single Splunk instance, catering to different use cases and user roles. These ready-made apps can be found on Splunkbase, providing additional functionalities and pre-configured solutions. Splunk Technology Add-ons serve as an abstraction layer for data collection methods. They often include relevant field extractions, allowing for schema-on-the-fly functionality. Additionally, Technology Add-ons encompass pertinent configuration files (props/transforms) and supporting scripts or binaries. A Splunk App, on the other hand, can be seen as a comprehensive solution that typically utilizes one or more Technology Add-ons to enhance its capabilities.
+- Knowledge Objects: These include fields, tags, event types, lookups, macros, data models, and alerts that enhance the data in Splunk, making it easier to search and analyze.
 
 
+**Splunk As A SIEM Solution**
+
+When it comes to cybersecurity, Splunk can play a crucial role as a log management solution, but its true value lies in its analytics-driven Security Information and Event Management (SIEM) capabilities. Splunk as a SIEM solution can aid in real-time and historical data analysis, cybersecurity monitoring, incident response, and threat hunting. Moreover, it empowers organizations to enhance their detection capabilities by leveraging User Behavior Analytics.
+
+As discussed, Splunk Processing Language (SPL) is a language containing over a hundred commands, functions, arguments, and clauses. It's the backbone of data analysis in Splunk, used for searching, filtering, transforming, and visualizing data.
+
+Let's assume that main is an index containing Windows Security and Sysmon logs, among others.
+
+1. Basic Searching
+
+The most fundamental aspect of SPL is searching. By default, a search returns all events, but it can be narrowed down with keywords, boolean operators, comparison operators, and wildcard characters. For instance, a search for error would return all events containing that word.
+
+Boolean operators AND, OR, and NOT are used for more specific queries.
+
+The search command is typically implicit at the start of each SPL query and is not usually written out. However, here's an example using explicit search syntax:
+
+```
+search index="main" "UNKNOWN"
+```
+
+By specifying the index as main, the query narrows down the search to only the events stored in the main index. The term UNKNOWN is then used as a keyword to filter and retrieve events that include this specific term.
+
+Note: Wildcards (*) can replace any number of characters in searches and field values. Example (implicit search syntax):
 
 
+```
+index="main" "*UNKNOWN*"
+```
 
+This SPL query will search within the main index for events that contain the term UNKNOWN anywhere in the event data.
 
+2. Fields and Comparison Operators
 
+Splunk automatically identifies certain data as fields (like source, sourcetype, host, EventCode, etc.), and users can manually define additional fields. These fields can be used with comparison operators (=, !=, <, >, <=, >=) for more precise searches. Example:
 
+```
+index="main" EventCode!=1
+```
 
+This SPL (Splunk Processing Language) query is used to search within the main index for events that do not have an EventCode value of 1.
 
+3. The fields command
 
+The fields command specifies which fields should be included or excluded in the search results. Example:
 
+```
+index="main" sourcetype="WinEventLog:Sysmon" EventCode=1 | fields - User
+```
 
-
-
-
-
-
-
+After retrieving all process creation events from the main index, the fields command excludes the User field from the search results. Thus, the results will contain all fields normally found in the Sysmon Event ID 1 logs, except for the user that initiated the process. Please note that utilizing sourcetype restricts the scope exclusively to Sysmon event logs.
 
 
 
