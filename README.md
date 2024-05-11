@@ -5523,3 +5523,574 @@ IDA will then forge the function calls flow graph for all functions in the binar
 - To open the function in the disassembly view, either double-click the function name or press Enter.
 - In the disassembly view, right-click anywhere and opt for either Xrefs graph to... or Xrefs graph from..., based on whether we want to observe the function calls made by the selected function or the function calls leading to the selected function.
 - IDA will craft the function calls flow graph and exhibit it in a new window.
+
+### Debugging 
+
+Debugging adds a dynamic, interactive layer to code analysis, offering a real-time view of malware behavior. It empowers analysts to confirm their discoveries, witness runtime impacts, and deepen their comprehension of the program execution. Uniting code analysis and debugging allows for a comprehensive understanding of the malware, leading to the effective exposure of harmful behavior.
+
+We could deploy a debugger like x64dbg, a user-friendly tool tailored for analyzing and debugging 64-bit Windows executables. It comes equipped with a graphical interface for visualizing disassembled code, implementing breakpoints, examining memory and registers, and controlling the execution of programs.
+
+
+### how to run a sample within x64dbg to familiarize with its operations.
+
+- Launch x64dbg.
+- At the top of the x64dbg interface, click the File menu.
+- Select Open to choose the executable file we wish to debug.
+- Browse to the directory containing the executable and select it.
+- Optionally, command-line arguments or the working directory can be specified in the dialog box that appears.
+- Click OK to load the executable into x64dbg.
+
+**Upon opening, the default window halts at a default breakpoint at the program's entry point.**
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/2137b0bd-9d1b-47b6-8241-38be92cea710)
+
+Loading an executable into x64dbg reveals the disassembly view, showcasing the assembly instructions of the program, thereby aiding in understanding the code flow. To the right, the register window divulges the values of CPU registers, shedding light on the program's state. Beneath the register window, the stack view displays the current stack frame, enabling the inspection of function calls and local variables. Lastly, on the bottom left corner, we find the memory dump view, providing a pictorial representation of the program's memory, facilitating the analysis of data structures and variables.
+
+## Simulating Internet Services
+
+The role of INetSim in simulating typical internet services in our restricted testing environment is pivotal. It offers support for a multitude of services, encompassing DNS, HTTP, FTP, SMTP, among others. We can fine-tune it to reproduce specific responses, thereby enabling a more tailored examination of the malware's behavior. Our approach will involve keeping InetSim operational so that it can intercept any DNS, HTTP, or other requests emanating from the malware sample (shell.exe), thereby providing it with controlled, synthetic responses.
+
+> [!NOTE]
+>  It is highly recommended that we use your own VM/machine for running InetSim. Our VM/machine should be connected to VPN using the provided VPN config file that resides at the end of this section.
+
+```
+sudo nano /etc/inetsim/inetsim.conf
+```
+The below need to be uncommented and specified.
+```
+service_bind_address <Our machine's/VM's TUN IP>
+dns_default_ip <Our machine's/VM's TUN IP>
+dns_default_hostname www
+dns_default_domainname iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com
+```
+
+Initiating INetSim involves executing the following command.
+
+```
+$ sudo inetsim 
+INetSim 1.3.2 (2020-05-19) by Matthias Eckert & Thomas Hungenberg
+Using log directory:      /var/log/inetsim/
+Using data directory:     /var/lib/inetsim/
+Using report directory:   /var/log/inetsim/report/
+Using configuration file: /etc/inetsim/inetsim.conf
+Parsing configuration file.
+Configuration file parsed successfully.
+=== INetSim main process started (PID 34711) ===
+Session ID:     34711
+Listening on:   0.0.0.0
+Real Date/Time: 2023-06-11 00:18:44
+Fake Date/Time: 2023-06-11 00:18:44 (Delta: 0 seconds)
+ Forking services...
+  * dns_53_tcp_udp - started (PID 34715)
+  * smtps_465_tcp - started (PID 34719)
+  * pop3_110_tcp - started (PID 34720)
+  * smtp_25_tcp - started (PID 34718)
+  * http_80_tcp - started (PID 34716)
+  * ftp_21_tcp - started (PID 34722)
+  * https_443_tcp - started (PID 34717)
+  * pop3s_995_tcp - started (PID 34721)
+  * ftps_990_tcp - started (PID 34723)
+ done.
+Simulation running.
+```
+A more elaborate resource on configuring INetSim is the following: 
+
+https://medium.com/@xNymia/malware-analysis-first-steps-creating-your-lab-21b769fb2a64
+
+Finally, the spawned target's DNS should be pointed to the machine/VM where INetSim is running.
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/e3d0c63a-3a08-46ce-bf29-73f8a4bc60a9)
+
+
+## Applying the Patches to Bypass Sandbox Checks
+
+Given that sandbox checks hinder the malware's direct execution on the machine, we need to patch these checks to circumvent the sandbox detection. Here's how we can dodge sandbox detection checks while debugging with x64dbg. Several methods can lead us to the instructions where sandbox detection is performed. We will discuss a few of these
+
+**By Copying the Address from IDA**
+
+
+During code analysis, we observed the sandbox detection check related to the registry key. We can extract the address of the first cmp instruction directly from IDA.
+
+To find the address, let's revert to the IDA windows, open the first function we had renamed as assumed_Main, and look for the cmp instruction. To view the addresses, we can transition from graph view to text view by pressing the spacebar button.
+
+This exposes the address (as highlighted in the below screenshot)
+
+We can copy the address 00000000004032C8 from IDA.
+
+
+```
+Code: ida
+
+.text:00000000004032C8                 cmp     [rsp+148h+Type], 1
+```
+
+In x64dbg, we can right-click anywhere on the disassembly view (CPU) and select Go to > Expression. Alternatively, we can press Ctrl+G (go to expression) as a shortcut.
+
+**We can enter the copied address here, as shown in the screenshot. This navigates us to the comparison instruction where we can implement changes.**
+
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/7d7f9cdf-2c3b-414b-888f-32dcc177471e)
+
+**By Searching Through the Strings.**
+
+Let's look for Sandbox detected in the String references, and set a breakpoint, so that when we hit run, the execution should pause at this point.
+
+To do this, first **click on the Run button once and then right-click anywhere on the disassembly view, and choose Search for > Current Module > String references.**
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/78873be1-e300-4559-8883-496396e9c7df)
+
+
+Next, we can add a breakpoint to mark the location, then study the instructions before this Sandbox MessageBox to discern how the jump was made to the instruction printing Sandbox detected.
+
+**Let's start by adding a breakpoint at the last Sandbox detected string as follows.**
+
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/bc56caa0-3789-44ab-82b7-f096ae54bbd9)
+
+**We can then double-click on the string to go to the address where the instructions to print Sandbox detected are located.**
+
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/dc84d8b0-04e8-4c5e-b89c-a12a121277e6)
+
+
+As observed, a cmp instruction is present above this MessageBox which compares the value with 1 after a registry path comparison has been performed. Let's modify this comparison value to match with 0 instead. This can be done by placing the cursor on that instruction and pressing Spacebar on the keyboard. This allows us to edit the assembly code instructions.
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/69520653-b10d-43ff-b761-8e411692e352)
+
+
+We can change the comparison value of 0x1 to 0x0. Changing the comparison to 0 may shift the control flow of the code, and it should not jump to the address where MessageBox is displayed.
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/d3b001ba-9a08-4ae3-a745-1b652084fb9f)
+
+Upon clicking on Run in x64dbg or pressing F9, it won't hit the breakpoint for the first sandbox detection message code. This means that we successfully patched the instructions.
+
+In a similar manner, we can add a breakpoint on the next sandbox detection function before it prints a MessageBox as well. To do that, the breakpoint should be placed at the second to last Sandbox detected string (0000000000402F13). If we double-click this string we will notice there's a jump instruction which we can skip, directing the execution flow to the next instruction that calls another function. That's exactly what we need – instead of the sandbox detection MessageBox, it jumps to another function.
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/e1f67077-59ec-43a3-a27a-081f78ff5f0e)
+
+We can alter the instruction from je shell.402F09 to jne shell.402F09.
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/299d8f1a-7526-4510-aa5b-ed9f67e6cd46)
+
+shell.exe performs sandbox detection by checking for internet connectivity. This section's target doesn't have internet connectivity. For this reason we should patch this sandbox detection method as well. We can do that by clicking on the first Sandbox detected string (0000000000402CBD) and patching the following instruction.
+
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/49939089-749d-4de8-b960-4dd415db7b2e)
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/4e133e33-baf0-4484-b67f-79c846ced415)
+
+
+Now, when we press Run, the patched shell.exe proceeds further, downloads the default executable from INetSim, and executes it.
+
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/c051a2a8-3fe1-4b62-b9f7-2d1e1505044f)
+
+With the sandbox checks bypassed, the actual functionality is unveiled. We can save the patched executable by pressing Ctrl+P and clicking on Patch File. This action stores the patched file, which skips the sandbox checks.
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/267dbd89-8cab-4741-814b-c3948424bda2)
+
+
+
+We undertake this process to ensure that the next time we run the saved patched file, it executes directly without the sandbox checks, and we can observe all the events in ProcessMonitor.
+
+Let's now employ Wireshark, to capture and examine the network traffic generated by the malware. Be mindful of the color-coded traffic: red corresponds to client-to-server traffic, while blue denotes the server-to-client exchanges.
+
+Examining the HTTP Request reveals that the malware sample appends the computer hostname to the user agent field (in this case it was RDSEMVM01).
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/194369a1-36d8-4275-bd0f-7b7bcc41e79a)
+
+
+When inspecting the HTTP Response, it becomes evident that InetSim has returned its default binary as a response to the malware.
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/63a5dbd5-6ca2-403a-aa70-1bb04e76a735)
+
+The malware's request for svchost.exe solicits the default binary from InetSim. This binary responds with a MessageBox featuring the message: This is the INetSim default binary.
+
+Additionally, DNS requests for a random domain and the address ms-windows-update[.]com were sent by the malware, with INetSim responding with fake responses (in this case INetSim was running on 10.10.10.100).
+
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/6ff3a0b3-75dd-43ab-8d3f-0e44fa5c1637)
+
+
+
+### Analyzing Process Injection & Memory Region
+
+
+On the journey of code analysis, we discovered that our executable performs process injection on notepad.exe and displays a MessageBox stating Connection sent to C2.
+
+To probe deeper into the process injection, we propose setting breakpoints at WINAPI functions VirtualAllocEx, WriteProcessMemory, and CreateRemoteThread. These breakpoints will allow us to scrutinize the content held in the registers during the process injection. Here's the procedure to set these breakpoints:
+
+- Access the x64dbg interface and navigate to the Symbols tab, located at the top.
+- In the symbol search box, search for the desired DLL name on the left and function names, such as VirtualAllocEx, WriteProcessMemory, and CreateRemoteThread, on the right within the Kernel32.dll DLL.
+- As the function names materialize in the search results, right-click and select Toggle breakpoint from the context menu for each function. An alternative shortcut is to press F2.
+
+
+**Executing these steps sets a breakpoint at each function's entry point. We'll replicate these steps for all the functions we intend to scrutinize.**
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/2abe372d-758d-43fc-9f91-a1567cfa09b8)
+
+After setting breakpoints, we press F9 or select Run from the toolbar until we reach the breakpoint for WriteProcessMemory. Up until this moment, notepad has been launched, but the shellcode has not yet been written into notepad's memory.
+
+**Attaching Another Running Process In x64dbg**
+
+In order to delve further, let's open another instance of x64dbg and attach it to notepad.exe.
+
+- Start a new instance of x64dbg.
+- Navigate to the File menu and select Attach or use the Alt + A keyboard shortcut.
+- In the Attach dialog box, a list of running processes will appear. Choose notepad.exe from the list.
+- Click the Attach button to begin the attachment process.
+
+Once the attachment is successful, x64dbg initiates the debugging of the target process, and the main window displays the assembly code along with other debugging information.
+
+**Now, we can establish breakpoints, step through the code, inspect registers and memory, and study the behavior of the attached notepad.exe process using x64dbg.**
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/24933592-444a-4516-bb53-ca62be8fd7df)
+
+
+The 2nd argument of WriteProcessMemory is lpBaseAddress which contains a pointer to the base address in the specified process to which data is written. In our case, it should be in the RDX register.
+
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/71db5a02-0b8d-41c3-b296-3957313b2b85)
+
+When invoking the WriteProcessMemory function, the rdx register holds the lpBaseAddress parameter. This parameter represents the address within the target process's address space where the data will be written.
+
+We aim to examine the registers when the WriteProcessMemory function is invoked in the x64dbg instance running the shell.exe process. This will reveal the address within notepad.exe where the shellcode will be written.
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/4f035eb4-aeb1-4b4f-a99d-d71e4875afc2)
+
+We copy this address to examine its content in the memory dump of the attached notepad.exe process in the second x64dbg instance.
+
+We now select Go to > Expression by right-clicking anywhere on the memory dump in the second x64dbg instance running notepad.exe.
+
+With the copied address entered, the content at this address is displayed (by right-clicking on the address and choosing Follow in Dump > Selected Address), which currently is empty.
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/296c996f-b837-46da-bbea-bb0a2f80d7a1)
+
+
+Next, we execute shell.exe in the first x64dbg instance by clicking on the Run button. We observe what is inscribed into this memory region of notepad.exe.
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/5cfd8646-632a-4b7e-bd8a-5e9fe6f6c616)
+
+
+Following its execution, we identify the injected shellcode, which aligns with what we discovered earlier during code analysis. We can verify this in Process Hacker and save it to a file for subsequent examination.
+
+
+# Creating Detection Rules
+
+Having now uncovered the Tactics, Techniques, and Procedures (TTPs) employed by this malware, we can proceed to design detection rules, such as Yara and Sigma rules.
+
+> [!TIP]
+> While we will begin to delve into the concepts of Yara and Sigma rule development in this section, we'll only scratch the surface. These are extensive topics with a lot of depth, necessitating a comprehensive study. Hence, we will be dedicating a complete module named 'YARA & Sigma for SOC Analysts' to help you truly master these crucial areas of cyber defense.
+
+## Yara
+
+YARA (Yet Another Recursive Acronym), a widely used open-source pattern matching tool and rule-based malware detection and classification framework let's us create custom rules to spot specific patterns or characteristics in files, processes, or memory. To draft a YARA rule for our sample, we'll need to examine the behavior, features, or specific strings/patterns unique to the sample we aim to detect.
+
+Here's a simple example of a YARA rule that matches the presence of the string Sandbox detected in a process. We remind you that shell.exe demonstrated such behavior.
+
+```
+Code: yara
+
+rule Shell_Sandbox_Detection {
+    strings:
+        $sandbox_string = "Sandbox detected"
+    condition:
+        $sandbox_string
+}
+
+```
+**Now let's add a lot more strings and patterns into the rule to make it better.**
+
+We can utilize the yarGen tool, which automates the process of generating YARA rules, with the prime objective of crafting the best possible rules for manual post-processing. This, however, necessitates a shrewd automatic preselection and a discerning human analyst to generate a robust rule.
+
+First let's create a new directory called Test inside the /home/htb-student/Samples/MalwareAnalysis directory of this section's target and then let's copy shell.exe (residing in the /home/htb-student/Samples/MalwareAnalysis directory) to the newly created Test directory as follows.
+
+```
+$ mkdir /home/htb-student/Samples/MalwareAnalysis/Test
+```
+
+```
+$ cp /home/htb-student/Samples/MalwareAnalysis/shell.exe /home/htb-student/Samples/MalwareAnalysis/Test/
+```
+
+**To automatically create a Yara rule for shell.exe we should execute the following (inside the /home/htb-student/yarGen-0.23.4 directory).**
+
+```
+$ sudo python3 yarGen.py -m /home/htb-student/Samples/MalwareAnalysis/Test/
+------------------------------------------------------------------------
+                   _____            
+    __ _____ _____/ ___/__ ___      
+   / // / _ `/ __/ (_ / -_) _ \     
+   \_, /\_,_/_/  \___/\__/_//_/     
+  /___/  Yara Rule Generator        
+         Florian Roth, July 2020, Version 0.23.3
+   
+  Note: Rules have to be post-processed
+  See this post for details: https://medium.com/@cyb3rops/121d29322282
+------------------------------------------------------------------------
+[+] Using identifier 'Test'
+[+] Using reference 'https://github.com/Neo23x0/yarGen'
+[+] Using prefix 'Test'
+[+] Processing PEStudio strings ...
+[+] Reading goodware strings from database 'good-strings.db' ...
+    (This could take some time and uses several Gigabytes of RAM depending on your db size)
+[+] Loading ./dbs/good-imphashes-part3.db ...
+[+] Total: 4029 / Added 4029 entries
+[+] Loading ./dbs/good-strings-part9.db ...
+[+] Total: 788 / Added 788 entries
+[+] Loading ./dbs/good-strings-part8.db ...
+[+] Total: 332082 / Added 331294 entries
+[+] Loading ./dbs/good-imphashes-part4.db ...
+[+] Total: 6426 / Added 2397 entries
+[+] Loading ./dbs/good-strings-part2.db ...
+[+] Total: 1703601 / Added 1371519 entries
+[+] Loading ./dbs/good-exports-part2.db ...
+[+] Total: 90960 / Added 90960 entries
+[+] Loading ./dbs/good-strings-part4.db ...
+[+] Total: 3860655 / Added 2157054 entries
+[+] Loading ./dbs/good-exports-part4.db ...
+[+] Total: 172718 / Added 81758 entries
+[+] Loading ./dbs/good-exports-part7.db ...
+[+] Total: 223584 / Added 50866 entries
+[+] Loading ./dbs/good-strings-part6.db ...
+[+] Total: 4571266 / Added 710611 entries
+[+] Loading ./dbs/good-strings-part7.db ...
+[+] Total: 5828908 / Added 1257642 entries
+[+] Loading ./dbs/good-exports-part1.db ...
+[+] Total: 293752 / Added 70168 entries
+[+] Loading ./dbs/good-exports-part3.db ...
+[+] Total: 326867 / Added 33115 entries
+[+] Loading ./dbs/good-imphashes-part9.db ...
+[+] Total: 6426 / Added 0 entries
+[+] Loading ./dbs/good-exports-part9.db ...
+[+] Total: 326867 / Added 0 entries
+[+] Loading ./dbs/good-imphashes-part5.db ...
+[+] Total: 13764 / Added 7338 entries
+[+] Loading ./dbs/good-imphashes-part8.db ...
+[+] Total: 13947 / Added 183 entries
+[+] Loading ./dbs/good-imphashes-part6.db ...
+[+] Total: 13976 / Added 29 entries
+[+] Loading ./dbs/good-strings-part1.db ...
+[+] Total: 6893854 / Added 1064946 entries
+[+] Loading ./dbs/good-imphashes-part7.db ...
+[+] Total: 17382 / Added 3406 entries
+[+] Loading ./dbs/good-exports-part6.db ...
+[+] Total: 328525 / Added 1658 entries
+[+] Loading ./dbs/good-imphashes-part2.db ...
+[+] Total: 18208 / Added 826 entries
+[+] Loading ./dbs/good-exports-part8.db ...
+[+] Total: 332359 / Added 3834 entries
+[+] Loading ./dbs/good-strings-part3.db ...
+[+] Total: 9152616 / Added 2258762 entries
+[+] Loading ./dbs/good-strings-part5.db ...
+[+] Total: 12284943 / Added 3132327 entries
+[+] Loading ./dbs/good-imphashes-part1.db ...
+[+] Total: 19764 / Added 1556 entries
+[+] Loading ./dbs/good-exports-part5.db ...
+[+] Total: 404321 / Added 71962 entries
+[+] Processing malware files ...
+[+] Processing /home/htb-student/Samples/MalwareAnalysis/Test/shell.exe ...
+[+] Generating statistical data ...
+[+] Generating Super Rules ... (a lot of magic)
+[+] Generating Simple Rules ...
+[-] Applying intelligent filters to string findings ...
+[-] Filtering string set for /home/htb-student/Samples/MalwareAnalysis/Test/shell.exe ...
+[=] Generated 1 SIMPLE rules.
+[=] All rules written to yargen_rules.yar
+[+] yarGen run finished
+```
+
+**We will notice that a file named yargen_rule.yar is generated by yarGen that incorporates unique strings, which are automatically extracted and inserted into the rule.**
+
+```
+$ cat yargen_rules.yar 
+/*
+   YARA Rule Set
+   Author: yarGen Rule Generator
+   Date: 2023-08-02
+   Identifier: Test
+   Reference: https://github.com/Neo23x0/yarGen
+*/
+
+/* Rule Set ----------------------------------------------------------------- */
+
+rule _home_htb_student_Samples_MalwareAnalysis_Test_shell {
+   meta:
+      description = "Test - file shell.exe"
+      author = "yarGen Rule Generator"
+      reference = "https://github.com/Neo23x0/yarGen"
+      date = "2023-08-02"
+      hash1 = "bd841e796feed0088ae670284ab991f212cf709f2391310a85443b2ed1312bda"
+   strings:
+      $x1 = "C:\\Windows\\System32\\cmd.exe" fullword ascii
+      $s2 = "http://ms-windows-update.com/svchost.exe" fullword ascii
+      $s3 = "C:\\Windows\\System32\\notepad.exe" fullword ascii
+      $s4 = "/k ping 127.0.0.1 -n 5" fullword ascii
+      $s5 = "iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com" fullword ascii
+      $s6 = "  VirtualQuery failed for %d bytes at address %p" fullword ascii
+      $s7 = "[-] Error code is : %lu" fullword ascii
+      $s8 = "C:\\Program Files\\VMware\\VMware Tools\\" fullword ascii
+      $s9 = "Failed to open the registry key." fullword ascii
+      $s10 = "  VirtualProtect failed with code 0x%x" fullword ascii
+      $s11 = "Connection sent to C2" fullword ascii
+      $s12 = "VPAPAPAPI" fullword ascii
+      $s13 = "AWAVAUATVSH" fullword ascii
+      $s14 = "45.33.32.156" fullword ascii
+      $s15 = "  Unknown pseudo relocation protocol version %d." fullword ascii
+      $s16 = "AQAPRQVH1" fullword ascii
+      $s17 = "connect" fullword ascii /* Goodware String - occured 429 times */
+      $s18 = "socket" fullword ascii /* Goodware String - occured 452 times */
+      $s19 = "tSIcK<L" fullword ascii
+      $s20 = "Windows-Update/7.6.7600.256 %s" fullword ascii
+   condition:
+      uint16(0) == 0x5a4d and filesize < 60KB and
+      1 of ($x*) and 4 of them
+}
+```
+
+We can review the rule and modify it as necessary, adding more strings and conditions to enhance its reliability and effectiveness.
+
+## Detecting Malware Using Yara Rules
+
+**We can then use this rule to scan a directory as follows.**
+
+### Creating Detection Rules
+
+```
+sumedh@sumedh$ yara /home/htb-student/yarGen-0.23.4/yargen_rules.yar /home/htb-student/Samples/MalwareAnalysis/
+home_htb_student_Samples_MalwareAnalysis_Test_shell /home/htb-student/Samples/MalwareAnalysis//shell.exe
+```
+**We will notice that shell.exe is returned!**
+> [!IMPORTANT]
+>  References for YARA rules
+
+- Yara documentation : https://yara.readthedocs.io/en/stable/writingrules.html
+- Yara resources - https://github.com/InQuest/awesome-yara
+- The DFIR Report - https://github.com/The-DFIR-Report/Yara-Rules
+
+## Sigma
+
+Sigma is a comprehensive and standardized rule format extensively used by security analysts and Security Information and Event Management (SIEM) systems. The objective is to detect and identify specific patterns or behaviors that could potentially signify security threats or events. The standardized format of Sigma rules enables security teams to define and disseminate detection logic across diverse security platforms.
+
+To construct a Sigma rule based on certain actions - for instance, dropping a file in a temporary location - we can devise a sample rule along these lines.
+
+```
+Code: sigma
+
+title: Suspicious File Drop in Users Temp Location
+status: experimental
+description: Detects suspicious activity where a file is dropped in the temp location
+
+logsource:
+    category: process_creation
+detection:
+    selection:
+        TargetFilename:
+            - '*\\AppData\\Local\\Temp\\svchost.exe'
+    condition: selection
+    level: high
+
+falsepositives:
+    - Legitimate exe file drops in temp location
+
+```
+**In this instance, the rule is designed to identify when the file svchost.exe is dropped in the Temp directory.**
+
+During analysis, it's advantageous to have a system monitoring agent operating continuously. In this context, we've chosen Sysmon to gather the logs. Sysmon is a powerful tool that captures detailed event data and aids in the creation of Sigma rules. Its log categories encompass process creation (EventID 1), network connection (EventID 3), file creation (EventID 11), registry modification (EventID 13), among others. The scrutiny of these events assists in pinpointing indicators of compromise (IOCs) and understanding behavior patterns, thus facilitating the crafting of effective detection rules.
+
+For instance, Sysmon has collected logs such as process creation, process access, file creation, and network connection, among others, in response to the activities conducted by shell.exe. This compiled information proves instrumental in enhancing our understanding of the sample's behavior and developing more precise and effective detection rules.
+
+**Process Create Logs:**
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/28b0e5c6-4543-4c85-a940-8c461d938c13)
+
+**Process Access Logs (not configured in the Windows targets of this module):**
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/8fdfa6ee-2227-4809-a307-b922a36275d1)
+
+**File Creation Logs:**
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/31c2cc48-0cea-4841-a430-8464ccfd61db)
+
+**Network Connection Logs:**
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/2b777783-856e-4988-9877-622c84c592cc)
+
+
+**Below are some references for Sigma rules:**
+
+> [!IMPORTANT]
+> Reference
+
+- Sigma documentation : https://github.com/SigmaHQ/sigma/wiki/Specification
+- Sigma resources - https://github.com/SigmaHQ/sigma/tree/master/rules
+- The DFIR Report - https://github.com/The-DFIR-Report/Sigma-Rules/tree/main/rules
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
