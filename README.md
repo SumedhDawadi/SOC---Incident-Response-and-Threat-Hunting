@@ -2540,6 +2540,10 @@ index="main" sourcetype="WinEventLog:Sysmon" EventCode=1 | fields - User
 After retrieving all process creation events from the main index, the fields command excludes the User field from the search results. Thus, the results will contain all fields normally found in the Sysmon Event ID 1 logs, except for the user that initiated the process. Please note that utilizing sourcetype restricts the scope exclusively to Sysmon event logs.
 
 
+> [!WARNING]
+> MORE about Splunk is missing.
+
+
 
 
 
